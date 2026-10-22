@@ -73,7 +73,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ xz-utils pkg-config openssl libcurl4-openssl-dev libssl-dev libobjc-13-dev
+          sudo apt-get install -y cmake ninja-build g++ xz-utils pkg-config openssl libcurl4-openssl-dev libssl-dev libobjc-13-dev gcc-mingw-w64-x86-64 gcc-mingw-w64-i686
 
       - name: Install macOS build dependencies
         if: runner.os == 'macOS'
@@ -159,10 +159,17 @@ jobs:
             armv7-unknown-linux-gnueabihf armv7-unknown-linux-musleabihf \
             x86_64-pc-windows-gnu i686-pc-windows-gnu aarch64-pc-windows-gnullvm \
             x86_64-apple-darwin aarch64-apple-darwin ; do
+            if [ "$triple" = "${{ matrix.host }}" ]; then
+              # The host triple's std ships with the bootstrap sysroot; a
+              # second build-std copy would leave two libstd candidates in
+              # the sysroot and break linking entirely
+              continue
+            fi
             if cargo build --release --target "$triple" -Z build-std=std,panic_abort; then
               mkdir -p "$STAGE1/lib/rustlib/$triple/lib"
               cp target/"$triple"/release/deps/lib*.rlib "$STAGE1/lib/rustlib/$triple/lib/"
               cp target/"$triple"/release/deps/lib*.rmeta "$STAGE1/lib/rustlib/$triple/lib/" || true
+              rm -f "$STAGE1/lib/rustlib/$triple/lib/"libstdseed-*
               echo "OK: $triple"
             else
               echo "::error::std build failed for $triple"
