@@ -139,9 +139,12 @@ jobs:
       - name: Build cross-target std into the sysroot
         run: |
           set -euo pipefail
+          # bootstrap.py already links $STAGE1/lib/rustlib/src/rust to the
+          # rust source checkout, so build-std finds the library sources
+          # through that symlink. Do NOT copy or mkdir into rustlib/src:
+          # following the symlink would pollute the source tree and fail
+          # packaging provenance.
           STAGE1="$(pwd)/build-rust-1.99/build/${{ matrix.host }}/stage1"
-          mkdir -p "$STAGE1/lib/rustlib/src/rust"
-          cp -r build-rust-1.99/library "$STAGE1/lib/rustlib/src/rust/library"
           # Minimal lib-only crate: compiles std rlibs without invoking a linker
           mkdir -p /tmp/stdbuild/src
           printf '[package]\nname = "stdseed"\nversion = "0.1.0"\nedition = "2021"\n' > /tmp/stdbuild/Cargo.toml
