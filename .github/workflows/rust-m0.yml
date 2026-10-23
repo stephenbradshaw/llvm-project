@@ -150,9 +150,12 @@ jobs:
           # following the symlink would pollute the source tree and fail
           # packaging provenance.
           STAGE1="$(pwd)/build-rust-1.99/build/${{ matrix.host }}/stage1"
-          # Minimal lib-only crate: compiles std rlibs without invoking a linker
+          # Minimal lib-only crate: compiles std rlibs without invoking a
+          # linker. The fat LTO profile makes cargo embed LLVM bitcode into
+          # the std rlibs (matching what downstream release profiles with
+          # `lto = "fat"` - which LTO against std - require).
           mkdir -p /tmp/stdbuild/src
-          printf '[package]\nname = "stdseed"\nversion = "0.1.0"\nedition = "2021"\n' > /tmp/stdbuild/Cargo.toml
+          printf '[package]\nname = "stdseed"\nversion = "0.1.0"\nedition = "2021"\n\n[profile.release]\nlto = "fat"\n' > /tmp/stdbuild/Cargo.toml
           echo 'pub fn seed() {}' > /tmp/stdbuild/src/lib.rs
           export RUSTC_BOOTSTRAP=1
           export RUSTC="$STAGE1/bin/rustc${{ matrix.exe }}"
