@@ -49,7 +49,7 @@ jobs:
             extension: zip
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # bootstrap.py verifies ancestry from the pinned LLVM base commit.
           # Full commit history keeps the proof valid as this branch grows.
@@ -165,10 +165,12 @@ jobs:
           export RUSTC="$STAGE1/bin/rustc${{ matrix.exe }}"
           # Remap the CI build tree out of the sysroot's panic locations so
           # downstream binaries do not reveal the build environment. rustc
-          # applies remaps in order and the FIRST match wins, so the
-          # specific subtrees are listed before the catch-all. Remapped
-          # paths mimic official rust std (/rustc/<version>/library/...).
-          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0 --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99=/rustc/1.99.0"
+          # applies remaps sequentially (each rewrites the path if the
+          # current value matches), so a catch-all rule would pre-empt the
+          # specific ones - only non-overlapping specific rules are used.
+          # Remapped paths mimic official rust std
+          # (/rustc/<version>/library/... and a vendor tree).
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0 --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/library=/rustc/1.99.0/library"
           # On Windows the runner's bash is msys: $(pwd) yields /c/-style
           # paths that native cargo cannot execute. Convert to a Windows
           # path; on Linux/macOS cygpath does not exist and this is a no-op.
@@ -252,7 +254,7 @@ jobs:
         run: python -B tests/obfuscation/test_http_programs.py --clang build-llvm-project/bin/clang --opt build-llvm-project/bin/opt --work-dir build-llvm-project/http-rust
 
       - name: Upload passing native toolchain archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust-obfuscation-${{ matrix.platform }}
           path: |
@@ -268,7 +270,7 @@ jobs:
 
       - name: Upload Rust diagnostic reports and emitted IR
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rust-obfuscation-diagnostics-${{ matrix.platform }}
           path: |
