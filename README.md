@@ -1,5 +1,52 @@
 # LLVM Obfuscator (LLVM 23.1.3)
 
+## About this fork
+
+This fork exists to produce **self-contained, obfuscation-capable compiler
+toolchains as ready-to-use release artifacts**, for both the C family and
+Rust, covering the common desktop and server platforms.
+
+What the release artifacts provide:
+
+- **Clang toolchain archives** built with all LLVM codegen backends enabled
+  and the seven registered obfuscation passes exposed through `clang`/`opt`,
+  now including **lld**, so ELF/COFF/WASM outputs can be linked without any
+  external toolchain.
+- **Pinned Rust compiler archives** (`rustc` + sysroot + Cargo launcher)
+  built against this LLVM with **all codegen backends enabled**, so a single
+  compiler binary cross-compiles to every architecture the upstream Rust
+  supports. The sysroot additionally ships **prebuilt `std` for common
+  cross targets** (each built with embedded bitcode so downstream
+  `lto = "fat"` profiles work out of the box), and the sysroot's panic
+  locations are remapped so no build-environment paths leak into produced
+  binaries.
+- **Deterministic builds**: the obfuscation passes are seeded, and repeat
+  builds with the same inputs produce identical binaries.
+- **No added artifacts**: obfuscation is applied at the IR level during the
+  normal compilation pipeline. The emitted machine code and data carry no
+  extra sections, metadata, or markers distinguishing them from ordinary
+  compiler output — the only observable difference is the obfuscation
+  itself. Source paths in produced binaries follow the standard compiler
+  conventions (`/rustc/<version>/...` for the prebuilt sysroot).
+- **Qualified, not just compiled**: every release runs the portable
+  transform suites, extracted-artifact qualification of the Rust toolchains
+  (native builds, both panic strategies, LTO modes, codegen unit counts),
+  and per-pass effect measurements, before the archives are published with
+  checksum sidecars.
+
+Platform notes: the Rust toolchain archives are built per host
+(Linux amd64/arm64, macOS arm64, Windows amd64) and cross-compile to all
+architectures from any of them; cross *linking* of Rust programs is expected
+to be driven by an external toolchain (e.g. zig or the target's own
+toolchain) as is conventional for Rust cross builds. The Clang archives
+link natively for ELF/COFF/WASM via the bundled lld; Mach-O targets require
+the platform SDK as usual.
+
+Everything below describes the transforms, build, and verification in
+detail.
+
+---
+
 Based on upstream [`llvmorg-23.1.3`](https://github.com/llvm/llvm-project/releases/tag/llvmorg-23.1.3)
 at commit `0d261d1ca552c95a8f007e061c787ac7132fbcbc`.
 
