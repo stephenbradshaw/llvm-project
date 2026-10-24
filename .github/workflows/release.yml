@@ -89,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S llvm -B build-llvm-project -G Ninja \
-            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_LIBXML2=OFF \
             -DLLVM_PARALLEL_LINK_JOBS=1 \
             -DCMAKE_BUILD_TYPE=Release
 
@@ -98,7 +98,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S llvm -B build-llvm-project -G Ninja \
-            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_LIBXML2=OFF \
             -DLLVM_PARALLEL_LINK_JOBS=1 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 \
             -DCMAKE_BUILD_TYPE=Release
@@ -108,7 +108,7 @@ jobs:
         shell: pwsh
         run: |
           cmake -S llvm -B build-llvm-project -G Ninja `
-            -DLLVM_ENABLE_PROJECTS="clang;lld" `
+            -DLLVM_ENABLE_PROJECTS="clang;lld" -DLLVM_ENABLE_LIBXML2=OFF `
             -DLLVM_PARALLEL_LINK_JOBS=1 `
             -DCMAKE_BUILD_TYPE=Release
 
