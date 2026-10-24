@@ -2,8 +2,6 @@ name: Rust obfuscation toolchain
 
 on:
   pull_request:
-  push:
-    branches: [main, feat/rust-obfuscation]
   workflow_dispatch:
   workflow_call:
 
