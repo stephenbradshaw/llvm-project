@@ -165,10 +165,10 @@ jobs:
           export RUSTC="$STAGE1/bin/rustc${{ matrix.exe }}"
           # Remap the CI build tree out of the sysroot's panic locations so
           # downstream binaries do not reveal the build environment. rustc
-          # lets the LAST matching remap win, so the catch-all is listed
-          # first and the specific subtrees after it. Remapped paths mimic
-          # official rust std (/rustc/<version>/library/...).
-          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99=/rustc/1.99.0 --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0"
+          # applies remaps in order and the FIRST match wins, so the
+          # specific subtrees are listed before the catch-all. Remapped
+          # paths mimic official rust std (/rustc/<version>/library/...).
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0 --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99=/rustc/1.99.0"
           # On Windows the runner's bash is msys: $(pwd) yields /c/-style
           # paths that native cargo cannot execute. Convert to a Windows
           # path; on Linux/macOS cygpath does not exist and this is a no-op.
