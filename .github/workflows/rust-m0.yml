@@ -159,10 +159,12 @@ jobs:
           echo 'pub fn seed() {}' > /tmp/stdbuild/src/lib.rs
           export RUSTC_BOOTSTRAP=1
           export RUSTC="$STAGE1/bin/rustc${{ matrix.exe }}"
-          # Remap the CI workspace prefix so the std rlibs' panic paths do
-          # not reveal the build environment in downstream binaries (they
-          # surface as /rustc/<version>/... just like official std builds).
-          export RUSTFLAGS="--remap-path-prefix=/home/runner/work/llvm-project/llvm-project=/rustc/1.99.0"
+          # Remap the CI build tree out of the sysroot's panic locations so
+          # downstream binaries do not reveal the build environment. Chain
+          # (rustc applies remaps in order): registry deps -> std sources
+          # -> anything else left under the clone directory. Remapped paths
+          # mimic official rust std (/rustc/<version>/library/...).
+          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0 --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99=/rustc/1.99.0"
           # On Windows the runner's bash is msys: $(pwd) yields /c/-style
           # paths that native cargo cannot execute. Convert to a Windows
           # path; on Linux/macOS cygpath does not exist and this is a no-op.
