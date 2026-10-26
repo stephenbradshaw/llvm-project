@@ -148,6 +148,7 @@ jobs:
       # into every payload that links the prebuilt std. Cargo reads
       # $CARGO_HOME/config.toml for every invocation in this job.
       - name: Write cargo-level sysroot path remap
+        shell: bash
         run: |
           WS="$GITHUB_WORKSPACE"
           if command -v cygpath >/dev/null 2>&1; then WS="$(cygpath -m "$WS")"; fi
