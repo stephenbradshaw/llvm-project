@@ -19,6 +19,12 @@ jobs:
     timeout-minutes: 350
     env:
       CARGO_HOME: ${{ github.workspace }}/build-rust-1.99/build/obfuscation-cargo-home
+      # Remap the CI workspace out of every cargo compilation in this job
+      # (the bootstrap-built host std in particular), so produced binaries
+      # carry /rustc/<version>/... paths instead of the runner's layout.
+      # Steps that need their own flag sets (the build-std std step)
+      # override RUSTFLAGS explicitly.
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}/build-rust-1.99=/rustc/1.99.0
     strategy:
       fail-fast: false
       matrix:
@@ -134,6 +140,20 @@ jobs:
 
       - name: Fetch pinned Rust 1.99 source
         run: git clone --depth 1 --branch 1.99.0 --filter=blob:none https://github.com/rust-lang/rust.git build-rust-1.99
+
+      # Remap the CI workspace out of the sysroot's panic locations at the
+      # CARGO level: the bootstrap's own flag plumbing does not extend into
+      # the cargo-compiled std dependency units (addr2line, gimli, ...),
+      # whose source paths otherwise leak the runner's workspace layout
+      # into every payload that links the prebuilt std. Cargo reads
+      # $CARGO_HOME/config.toml for every invocation in this job.
+      - name: Write cargo-level sysroot path remap
+        run: |
+          mkdir -p "${CARGO_HOME}"
+          cat > "${CARGO_HOME}/config.toml" << 'EOF'
+          [build]
+          rustflags = ["--remap-path-prefix=${{ github.workspace }}/build-rust-1.99=/rustc/1.99.0"]
+          EOF
 
       - name: Build pinned stage-1 Rust compiler and sysroot
         run: python -B tools/rust-obfuscation/bootstrap.py build --jobs 4
