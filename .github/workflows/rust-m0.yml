@@ -149,10 +149,12 @@ jobs:
       # $CARGO_HOME/config.toml for every invocation in this job.
       - name: Write cargo-level sysroot path remap
         run: |
+          WS="$GITHUB_WORKSPACE"
+          if command -v cygpath >/dev/null 2>&1; then WS="$(cygpath -m "$WS")"; fi
           mkdir -p "${CARGO_HOME}"
-          cat > "${CARGO_HOME}/config.toml" << 'EOF'
+          cat > "${CARGO_HOME}/config.toml" << EOF
           [build]
-          rustflags = ["--remap-path-prefix=${{ github.workspace }}/build-rust-1.99=/rustc/1.99.0"]
+          rustflags = ["--remap-path-prefix=$WS/build-rust-1.99=/rustc/1.99.0"]
           EOF
 
       - name: Build pinned stage-1 Rust compiler and sysroot
@@ -190,7 +192,9 @@ jobs:
           # specific ones - only non-overlapping specific rules are used.
           # Remapped paths mimic official rust std
           # (/rustc/<version>/library/... and a vendor tree).
-          export RUSTFLAGS="--remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0 --remap-path-prefix=${GITHUB_WORKSPACE}/build-rust-1.99/library=/rustc/1.99.0/library"
+          WS="$GITHUB_WORKSPACE"
+          if command -v cygpath >/dev/null 2>&1; then WS="$(cygpath -m "$WS")"; fi
+          export RUSTFLAGS="--remap-path-prefix=$WS/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=$WS/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0 --remap-path-prefix=$WS/build-rust-1.99/library=/rustc/1.99.0/library"
           # On Windows the runner's bash is msys: $(pwd) yields /c/-style
           # paths that native cargo cannot execute. Convert to a Windows
           # path; on Linux/macOS cygpath does not exist and this is a no-op.
