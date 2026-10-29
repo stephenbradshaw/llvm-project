@@ -139,6 +139,7 @@ jobs:
         run: python -B tests/obfuscation/rust/test_machine_code.py
 
       - name: Fetch pinned Rust 1.99 source
+        shell: bash
         run: |
           git clone --depth 1 --branch 1.99.0 --filter=blob:none https://github.com/rust-lang/rust.git build-rust-1.99
           # The path remaps below point at this exact upstream commit: it
