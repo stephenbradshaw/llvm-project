@@ -19,12 +19,9 @@ jobs:
     timeout-minutes: 350
     env:
       CARGO_HOME: ${{ github.workspace }}/build-rust-1.99/build/obfuscation-cargo-home
-      # Remap the CI workspace out of every cargo compilation in this job
-      # (the bootstrap-built host std in particular), so produced binaries
-      # carry /rustc/<commit>/... paths instead of the runner's layout.
-      # Steps that need their own flag sets (the build-std std step)
-      # override RUSTFLAGS explicitly.
-      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}/build-rust-1.99=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4
+      # RUSTFLAGS is exported by "Export sysroot path remaps" after the
+      # rust source checkout. Specific prefixes only (vendor, library,
+      # stage1 src symlink) — never a whole-checkout catch-all.
     strategy:
       fail-fast: false
       matrix:
@@ -155,22 +152,23 @@ jobs:
             exit 1
           fi
 
-      # Remap the CI workspace out of the sysroot's panic locations at the
-      # CARGO level: the bootstrap's own flag plumbing does not extend into
-      # the cargo-compiled std dependency units (addr2line, gimli, ...),
-      # whose source paths otherwise leak the runner's workspace layout
-      # into every payload that links the prebuilt std. Cargo reads
+      # Specific remaps shared by job RUSTFLAGS, cargo config.toml, and
+      # bootstrap.toml (see bootstrap.sysroot_remap_pairs). On Windows the
+      # helper emits forward-slash prefixes matching rustc's path spelling.
+      - name: Export sysroot path remaps
+        shell: bash
+        run: |
+          flags="$(python -B tools/rust-obfuscation/bootstrap.py print-remaps --host '${{ matrix.host }}')"
+          echo "RUSTFLAGS=$flags" >> "$GITHUB_ENV"
+          echo "exported RUSTFLAGS=$flags"
+
+      # Cargo-level remaps cover std dependency units (addr2line, gimli, ...)
+      # that the bootstrap's own flag plumbing does not reach. Cargo reads
       # $CARGO_HOME/config.toml for every invocation in this job.
       - name: Write cargo-level sysroot path remap
         shell: bash
         run: |
-          WS="$GITHUB_WORKSPACE"
-          if command -v cygpath >/dev/null 2>&1; then WS="$(cygpath -m "$WS")"; fi
-          mkdir -p "${CARGO_HOME}"
-          cat > "${CARGO_HOME}/config.toml" << EOF
-          [build]
-          rustflags = ["--remap-path-prefix=$WS/build-rust-1.99=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"]
-          EOF
+          python -B tools/rust-obfuscation/bootstrap.py write-cargo-remaps --host '${{ matrix.host }}'
 
       - name: Build pinned stage-1 Rust compiler and sysroot
         run: python -B tools/rust-obfuscation/bootstrap.py build --jobs 4
@@ -200,16 +198,10 @@ jobs:
           echo 'pub fn seed() {}' > /tmp/stdbuild/src/lib.rs
           export RUSTC_BOOTSTRAP=1
           export RUSTC="$STAGE1/bin/rustc${{ matrix.exe }}"
-          # Remap the CI build tree out of the sysroot's panic locations so
-          # downstream binaries do not reveal the build environment. rustc
-          # applies remaps sequentially (each rewrites the path if the
-          # current value matches), so a catch-all rule would pre-empt the
-          # specific ones - only non-overlapping specific rules are used.
-          # Remapped paths mimic official rust std
-          # (/rustc/<commit>/library/... and a vendor tree).
-          WS="$GITHUB_WORKSPACE"
-          if command -v cygpath >/dev/null 2>&1; then WS="$(cygpath -m "$WS")"; fi
-          export RUSTFLAGS="--remap-path-prefix=$WS/build-rust-1.99/build/obfuscation-cargo-home=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/vendor --remap-path-prefix=$WS/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4 --remap-path-prefix=$WS/build-rust-1.99/library=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library"
+          # Same specific remaps as the rest of the job (vendor / library /
+          # stage1 src symlink). Re-export explicitly so a step-level
+          # override cannot silently drop them.
+          export RUSTFLAGS="$(python -B tools/rust-obfuscation/bootstrap.py print-remaps --host '${{ matrix.host }}')"
           # On Windows the runner's bash is msys: $(pwd) yields /c/-style
           # paths that native cargo cannot execute. Convert to a Windows
           # path; on Linux/macOS cygpath does not exist and this is a no-op.
@@ -278,6 +270,9 @@ jobs:
 
       - name: Package pinned native Rust toolchain
         run: python -B tools/rust-obfuscation/package.py --stage1 build-rust-1.99/build/${{ matrix.host }}/stage1 --rust-source build-rust-1.99 --wrapper build-llvm-project/cargo-wrapper-target/release/rust-obf-cargo${{ matrix.exe }} --opt build-llvm-project/bin/opt${{ matrix.exe }} --objdump build-llvm-project/bin/llvm-objdump${{ matrix.exe }} --output build-llvm-project/rust-obfuscation-${{ matrix.platform }}.${{ matrix.extension }}
+
+      - name: Check host libstd panic-path remaps
+        run: python -B tools/rust-obfuscation/bootstrap.py check-sysroot-paths --libstd build-rust-1.99/build/${{ matrix.host }}/stage1
 
       - name: Verify extracted toolchain, HTTPS, Cargo, EH, and cost
         run: python -B tools/rust-obfuscation/verify_package.py --archive build-llvm-project/rust-obfuscation-${{ matrix.platform }}.${{ matrix.extension }} --work-dir build-llvm-project/rust-extracted --expected-commit ${{ github.sha }} --full --clang build-llvm-project/bin/clang${{ matrix.exe }} --online --live-https --benchmark

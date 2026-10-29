@@ -421,26 +421,151 @@ def fetch_rust_source(source: Path, archive: Path) -> None:
     check_rust_source(source)
 
 
+
+def normalize_ci_workspace(workspace: str | None = None) -> str | None:
+    """Return the CI workspace with forward slashes, or None outside CI.
+
+    Remap prefixes must match the spelling rustc sees. Do not resolve()
+    symlinks: a /tmp vs /private/tmp rewrite (or any CI symlink) would
+    make the remap miss the paths rustc embedded. GitHub's Windows
+    runners export backslashes; forward-slash form matches the old
+    `cygpath -m` spelling used by the bash steps.
+    """
+    raw = workspace if workspace is not None else os.environ.get("GITHUB_WORKSPACE")
+    if not raw:
+        return None
+    return raw.replace("\\", "/").rstrip("/")
+
+
+def sysroot_remap_pairs(workspace: str | None = None, host: str | None = None
+                        ) -> list[tuple[str, str]]:
+    """Specific (from, to) remaps that mimic official rust panic paths.
+
+    Never remap the whole checkout to /rustc/<commit>: that leaves
+    `build/obfuscation-cargo-home/...` as a custom-toolchain tell. Only
+    non-overlapping specific prefixes are used so rustc cannot apply a
+    broad rule before a narrower one.
+    """
+    ws = normalize_ci_workspace(workspace)
+    if not ws:
+        return []
+    root = f"{ws}/build-rust-1.99"
+    pairs = [
+        (f"{root}/build/obfuscation-cargo-home",
+         f"/rustc/{RUST_SRC_COMMIT}/vendor"),
+        (f"{root}/library",
+         f"/rustc/{RUST_SRC_COMMIT}/library"),
+    ]
+    if host:
+        pairs.append(
+            (f"{root}/build/{host}/stage1/lib/rustlib/src/rust",
+             f"/rustc/{RUST_SRC_COMMIT}")
+        )
+    # On Windows rustc may embed either separator. Emit both spellings of
+    # each from-prefix so the remap cannot miss on path orthography.
+    if len(ws) >= 2 and ws[1] == ":":
+        pairs = pairs + [
+            (src.replace("/", "\\"), dst)
+            for src, dst in pairs
+            if "\\" not in src and "/" in src
+        ]
+    return pairs
+
+
+def sysroot_remap_rustflags(workspace: str | None = None, host: str | None = None
+                            ) -> list[str]:
+    return [
+        f"--remap-path-prefix={src}={dst}"
+        for src, dst in sysroot_remap_pairs(workspace, host)
+    ]
+
+
+def write_cargo_sysroot_remaps(cargo_home: Path, host: str,
+                               workspace: str | None = None) -> Path:
+    """Write $CARGO_HOME/config.toml with the shared sysroot remaps."""
+    flags = sysroot_remap_rustflags(workspace, host)
+    if not flags:
+        raise RuntimeError(
+            "write-cargo-remaps requires GITHUB_WORKSPACE (or --workspace)"
+        )
+    cargo_home = Path(cargo_home)
+    cargo_home.mkdir(parents=True, exist_ok=True)
+    config = cargo_home / "config.toml"
+    body = (
+        "[build]\n"
+        "rustflags = ["
+        + ", ".join(json.dumps(flag) for flag in flags)
+        + "]\n"
+    )
+    config.write_text(body)
+    return config
+
+
+def check_sysroot_panic_paths(libstd: Path, commit: str = RUST_SRC_COMMIT) -> None:
+    """Fail if a packaged libstd still embeds CI / custom-toolchain paths."""
+    data = Path(libstd).read_bytes()
+    forbidden = (
+        b"obfuscation-cargo-home",
+        b"/home/runner",
+        b"/Users/runner",
+        b"build-rust-1.99",
+        b"/rustc/1.99.0",
+        b"D:/a/llvm-project",
+        b"D:\\a\\llvm-project",
+    )
+    for needle in forbidden:
+        if needle in data:
+            raise RuntimeError(
+                f"sysroot path leak {needle!r} remains in {Path(libstd).name}"
+            )
+    required = f"/rustc/{commit}/library".encode()
+    if required not in data:
+        raise RuntimeError(
+            f"expected {required.decode()!r} panic-path prefix in "
+            f"{Path(libstd).name}; remap-debuginfo / specific remaps may "
+            f"not have applied"
+        )
+
+
+def find_host_libstd(stage_or_package: Path) -> Path:
+    """Locate the host libstd rlib under a stage1 tree or packaged toolchain."""
+    root = Path(stage_or_package)
+    candidates = [
+        root / "rust-toolchain",
+        root,
+    ]
+    for base in candidates:
+        rustlib = base / "lib" / "rustlib"
+        if not rustlib.is_dir():
+            continue
+        for host_dir in sorted(rustlib.iterdir()):
+            lib = host_dir / "lib"
+            if not lib.is_dir():
+                continue
+            matches = sorted(lib.glob("libstd-*.rlib"))
+            if matches:
+                return matches[0]
+    raise RuntimeError(f"no host libstd rlib under {root}")
+
+
 def render_config(llvm_config: Path, jobs: int, host: str) -> str:
     if jobs < 1:
         raise RuntimeError("--jobs must be positive")
     # JSON strings are also valid TOML strings; this escapes paths safely.
     llvm_path = json.dumps(str(llvm_config.resolve()))
-    # Remap the CI build tree out of the sysroot's panic locations so
-    # downstream binaries do not reveal the build environment. rustc
-    # applies remaps sequentially (each rewrites the path if the current
-    # value matches), so only non-overlapping specific rules are used - a
-    # catch-all would pre-empt them. Remapped paths mimic official rust
-    # std (/rustc/<commit>/library/... and a vendor tree). Outside CI the
-    # prefixes do not exist and the remaps are no-ops.
-    ci_workspace = os.environ.get("GITHUB_WORKSPACE")
+    # Specific remaps only (see sysroot_remap_pairs). remap-debuginfo is
+    # what upstream releases use so host std frames read as
+    # /rustc/<commit>/library/...; the rustflags cover cargo-home vendor
+    # units and the build-std symlink path that remap-debuginfo alone
+    # does not rewrite.
+    rustflags = sysroot_remap_rustflags(host=host)
     rustflags_line = ""
-    if ci_workspace:
-        rustflags = [
-            f"--remap-path-prefix={ci_workspace}/build-rust-1.99/build/obfuscation-cargo-home=/rustc/{RUST_SRC_COMMIT}/vendor",
-            f"--remap-path-prefix={ci_workspace}/build-rust-1.99/library=/rustc/{RUST_SRC_COMMIT}/library",
-        ]
-        rustflags_line = "rustflags = [" + ", ".join(json.dumps(f) for f in rustflags) + "]\n"
+    if rustflags:
+        rustflags_line = (
+            "rustflags = ["
+            + ", ".join(json.dumps(flag) for flag in rustflags)
+            + "]\n"
+        )
     return f'''# Generated by tools/rust-obfuscation/bootstrap.py. Do not hand-edit.
 change-id = "ignore"
 
@@ -459,11 +584,13 @@ download-rustc = false
 codegen-backends = ["llvm"]
 channel = "dev"
 lld = false
+remap-debuginfo = true
 {rustflags_line}
 [target.{host}]
 llvm-config = {llvm_path}
 llvm-has-rust-patches = false
 '''
+
 
 
 def llvm_build_inputs(llvm_config: Path):
@@ -531,8 +658,28 @@ def build_stage1(source, llvm_config, host, config_path, env):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("check", "prepare", "build"))
+    parser.add_argument(
+        "action",
+        choices=(
+            "check", "prepare", "build",
+            "print-remaps", "write-cargo-remaps", "check-sysroot-paths",
+        ),
+    )
     parser.add_argument("--rust-source", type=Path, default=ROOT / "build-rust-1.99")
+    parser.add_argument(
+        "--host",
+        help="host triple for stage1 symlink remap / cargo remaps "
+             "(default: detected host triple)",
+    )
+    parser.add_argument(
+        "--workspace",
+        help="CI workspace root override (default: $GITHUB_WORKSPACE)",
+    )
+    parser.add_argument(
+        "--libstd",
+        type=Path,
+        help="libstd rlib (or stage1/package root) for check-sysroot-paths",
+    )
     llvm_config_name = "llvm-config.exe" if platform.system() == "Windows" else "llvm-config"
     parser.add_argument("--llvm-config", type=Path, default=ROOT / "build-llvm-project/bin" / llvm_config_name)
     parser.add_argument("--archive", type=Path, default=ROOT / "build-rust-1.99-src.tar.xz")
@@ -541,6 +688,35 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 1, 8))
     args = parser.parse_args()
     try:
+        if args.action == "print-remaps":
+            host = args.host or host_triple()
+            flags = sysroot_remap_rustflags(args.workspace, host)
+            if not flags:
+                raise RuntimeError(
+                    "print-remaps requires GITHUB_WORKSPACE (or --workspace)"
+                )
+            print(" ".join(flags))
+            return 0
+        if args.action == "write-cargo-remaps":
+            host = args.host or host_triple()
+            cargo_home = Path(
+                args.cargo_home
+                or os.environ.get("CARGO_HOME")
+                or (ROOT / "build-rust-1.99/build/obfuscation-cargo-home")
+            )
+            config = write_cargo_sysroot_remaps(
+                cargo_home, host, workspace=args.workspace
+            )
+            print(f"wrote {config}")
+            return 0
+        if args.action == "check-sysroot-paths":
+            if not args.libstd:
+                raise RuntimeError("check-sysroot-paths requires --libstd")
+            target = args.libstd
+            libstd = target if target.name.startswith("libstd-") and target.suffix == ".rlib" else find_host_libstd(target)
+            check_sysroot_panic_paths(libstd)
+            print(f"PASS sysroot panic paths: {libstd}")
+            return 0
         host = host_triple()
         if args.action != "check":
             check_msvc_environment(host)

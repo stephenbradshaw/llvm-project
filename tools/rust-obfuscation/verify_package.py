@@ -12,6 +12,7 @@ from pathlib import Path
 from verify_integrity import (sha256, validate_native_rustc_host,
                               validate_package_path, verify_archive_sidecar,
                               verify_tree)
+import bootstrap
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -143,6 +144,7 @@ def main():
     for tool in (rustc, rustdoc, wrapper, opt, objdump, llvm_ar, llvm_dis):
         if not tool.is_file():
             raise ValueError(f"packaged tool is absent: {tool}")
+    bootstrap.check_sysroot_panic_paths(bootstrap.find_host_libstd(package))
     rust_version = run([rustc, "-vV"]).stdout.strip()
     if rust_version != manifest["rustc_vv"]:
         raise ValueError("extracted rustc version differs from manifest")
