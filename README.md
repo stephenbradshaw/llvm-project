@@ -27,7 +27,7 @@ What the release artifacts provide:
   extra sections, metadata, or markers distinguishing them from ordinary
   compiler output — the only observable difference is the obfuscation
   itself. Source paths in produced binaries follow the standard compiler
-  conventions (`/rustc/<version>/...` for the prebuilt sysroot).
+  conventions (`/rustc/<commit>/...` for the prebuilt sysroot).
 - **Qualified, not just compiled**: every release runs the portable
   transform suites, extracted-artifact qualification of the Rust toolchains
   (native builds, both panic strategies, LTO modes, codegen unit counts),

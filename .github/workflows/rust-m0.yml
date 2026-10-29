@@ -21,10 +21,10 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/build-rust-1.99/build/obfuscation-cargo-home
       # Remap the CI workspace out of every cargo compilation in this job
       # (the bootstrap-built host std in particular), so produced binaries
-      # carry /rustc/<version>/... paths instead of the runner's layout.
+      # carry /rustc/<commit>/... paths instead of the runner's layout.
       # Steps that need their own flag sets (the build-std std step)
       # override RUSTFLAGS explicitly.
-      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}/build-rust-1.99=/rustc/1.99.0
+      RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}/build-rust-1.99=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4
     strategy:
       fail-fast: false
       matrix:
@@ -139,7 +139,20 @@ jobs:
         run: python -B tests/obfuscation/rust/test_machine_code.py
 
       - name: Fetch pinned Rust 1.99 source
-        run: git clone --depth 1 --branch 1.99.0 --filter=blob:none https://github.com/rust-lang/rust.git build-rust-1.99
+        run: |
+          git clone --depth 1 --branch 1.99.0 --filter=blob:none https://github.com/rust-lang/rust.git build-rust-1.99
+          # The path remaps below point at this exact upstream commit: it
+          # makes the sysroot's embedded panic locations read as
+          # /rustc/<commit>/library/... exactly like official rust builds
+          # (a release-version path would be a custom-toolchain tell).
+          # The commit is pinned in bootstrap.RUST_SRC_COMMIT; fail fast
+          # if the tag moved or the clone went wrong.
+          expected="$(python -B -c "import sys; sys.path.insert(0, 'tools/rust-obfuscation'); import bootstrap; print(bootstrap.RUST_SRC_COMMIT)")"
+          actual="$(git -C build-rust-1.99 rev-parse HEAD)"
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::rust 1.99.0 checkout is $actual, expected $expected"
+            exit 1
+          fi
 
       # Remap the CI workspace out of the sysroot's panic locations at the
       # CARGO level: the bootstrap's own flag plumbing does not extend into
@@ -155,7 +168,7 @@ jobs:
           mkdir -p "${CARGO_HOME}"
           cat > "${CARGO_HOME}/config.toml" << EOF
           [build]
-          rustflags = ["--remap-path-prefix=$WS/build-rust-1.99=/rustc/1.99.0"]
+          rustflags = ["--remap-path-prefix=$WS/build-rust-1.99=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4"]
           EOF
 
       - name: Build pinned stage-1 Rust compiler and sysroot
@@ -192,10 +205,10 @@ jobs:
           # current value matches), so a catch-all rule would pre-empt the
           # specific ones - only non-overlapping specific rules are used.
           # Remapped paths mimic official rust std
-          # (/rustc/<version>/library/... and a vendor tree).
+          # (/rustc/<commit>/library/... and a vendor tree).
           WS="$GITHUB_WORKSPACE"
           if command -v cygpath >/dev/null 2>&1; then WS="$(cygpath -m "$WS")"; fi
-          export RUSTFLAGS="--remap-path-prefix=$WS/build-rust-1.99/build/obfuscation-cargo-home=/rustc/1.99.0/vendor --remap-path-prefix=$WS/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/1.99.0 --remap-path-prefix=$WS/build-rust-1.99/library=/rustc/1.99.0/library"
+          export RUSTFLAGS="--remap-path-prefix=$WS/build-rust-1.99/build/obfuscation-cargo-home=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/vendor --remap-path-prefix=$WS/build-rust-1.99/build/${{ matrix.host }}/stage1/lib/rustlib/src/rust=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4 --remap-path-prefix=$WS/build-rust-1.99/library=/rustc/b940084d7eb6a299eb4bfeb8e34901bc051e7ac4/library"
           # On Windows the runner's bash is msys: $(pwd) yields /c/-style
           # paths that native cargo cannot execute. Convert to a Windows
           # path; on Linux/macOS cygpath does not exist and this is a no-op.
