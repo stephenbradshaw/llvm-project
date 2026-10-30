@@ -441,21 +441,33 @@ def sysroot_remap_pairs(workspace: str | None = None, host: str | None = None
                         ) -> list[tuple[str, str]]:
     """Specific (from, to) remaps that mimic official rust panic paths.
 
+    Always rewrite `/rustc/<version>` → `/rustc/<commit>`: with
+    `channel = "dev"`, bootstrap defaults `omit-git-hash = true`, and
+    `remap-debuginfo` then falls back to the version string
+    (`/rustc/1.99.0/...`) instead of the upstream commit. That is a
+    custom-toolchain tell; forcing omit-git-hash = false (in
+    render_config) plus this rewrite keeps artifacts on the official
+    `/rustc/<commit>/...` shape.
+
     Never remap the whole checkout to /rustc/<commit>: that leaves
-    `build/obfuscation-cargo-home/...` as a custom-toolchain tell. Only
+    `build/obfuscation-cargo-home/...` as another custom tell. Only
     non-overlapping specific prefixes are used so rustc cannot apply a
     broad rule before a narrower one.
     """
+    version = PINS["rust_version"]
+    pairs: list[tuple[str, str]] = [
+        (f"/rustc/{version}", f"/rustc/{RUST_SRC_COMMIT}"),
+    ]
     ws = normalize_ci_workspace(workspace)
     if not ws:
-        return []
+        return pairs
     root = f"{ws}/build-rust-1.99"
-    pairs = [
+    pairs.extend([
         (f"{root}/build/obfuscation-cargo-home",
          f"/rustc/{RUST_SRC_COMMIT}/vendor"),
         (f"{root}/library",
          f"/rustc/{RUST_SRC_COMMIT}/library"),
-    ]
+    ])
     if host:
         pairs.append(
             (f"{root}/build/{host}/stage1/lib/rustlib/src/rust",
@@ -467,9 +479,10 @@ def sysroot_remap_pairs(workspace: str | None = None, host: str | None = None
         pairs = pairs + [
             (src.replace("/", "\\"), dst)
             for src, dst in pairs
-            if "\\" not in src and "/" in src
+            if src.startswith(ws) and "/" in src
         ]
     return pairs
+
 
 
 def sysroot_remap_rustflags(workspace: str | None = None, host: str | None = None
@@ -553,11 +566,12 @@ def render_config(llvm_config: Path, jobs: int, host: str) -> str:
         raise RuntimeError("--jobs must be positive")
     # JSON strings are also valid TOML strings; this escapes paths safely.
     llvm_path = json.dumps(str(llvm_config.resolve()))
-    # Specific remaps only (see sysroot_remap_pairs). remap-debuginfo is
-    # what upstream releases use so host std frames read as
-    # /rustc/<commit>/library/...; the rustflags cover cargo-home vendor
-    # units and the build-std symlink path that remap-debuginfo alone
-    # does not rewrite.
+    # Specific remaps only (see sysroot_remap_pairs). remap-debuginfo +
+    # omit-git-hash = false make host std frames read as
+    # /rustc/<commit>/library/... (official shape). rustflags cover
+    # cargo-home vendor units, the build-std symlink path, and a
+    # /rustc/<version> → /rustc/<commit> rewrite for any residual
+    # version-style paths.
     rustflags = sysroot_remap_rustflags(host=host)
     rustflags_line = ""
     if rustflags:
@@ -583,6 +597,10 @@ assertions = true
 download-rustc = false
 codegen-backends = ["llvm"]
 channel = "dev"
+# channel=dev would otherwise default omit-git-hash=true, making
+# remap-debuginfo fall back to /rustc/<version>/ instead of the
+# upstream commit hash that official builds embed.
+omit-git-hash = false
 lld = false
 remap-debuginfo = true
 {rustflags_line}

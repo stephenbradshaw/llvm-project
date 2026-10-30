@@ -33,24 +33,29 @@ class RustSrcCommitConsistencyTest(unittest.TestCase):
         pairs = bootstrap.sysroot_remap_pairs(
             "/tmp/ci-ws", "x86_64-unknown-linux-gnu"
         )
-        self.assertEqual(len(pairs), 3)
+        self.assertEqual(len(pairs), 4)
         self.assertTrue(all(bootstrap.RUST_SRC_COMMIT in dst for _, dst in pairs))
         self.assertEqual(
             pairs[0],
+            (f"/rustc/{bootstrap.PINS['rust_version']}",
+             f"/rustc/{bootstrap.RUST_SRC_COMMIT}"),
+        )
+        self.assertEqual(
+            pairs[1],
             (
                 "/tmp/ci-ws/build-rust-1.99/build/obfuscation-cargo-home",
                 f"/rustc/{bootstrap.RUST_SRC_COMMIT}/vendor",
             ),
         )
         self.assertEqual(
-            pairs[1],
+            pairs[2],
             (
                 "/tmp/ci-ws/build-rust-1.99/library",
                 f"/rustc/{bootstrap.RUST_SRC_COMMIT}/library",
             ),
         )
         # Forbidden as a remap *target*; the checker may mention the
-        # string as a leak needle.
+        # string as a leak needle / as a from-prefix.
         self.assertTrue(
             all(not dst.startswith("/rustc/1.99.0") for _, dst in pairs)
         )
@@ -61,13 +66,19 @@ class RustSrcCommitConsistencyTest(unittest.TestCase):
             pathlib.Path("/usr/bin/true"), 1, "x86_64-unknown-linux-gnu"
         )
         self.assertIn("remap-debuginfo = true", cfg)
-        self.assertNotIn("rustflags", cfg)
+        self.assertIn("omit-git-hash = false", cfg)
+        # Even outside CI, rewrite /rustc/<version> → /rustc/<commit>
+        self.assertIn(
+            f"/rustc/{bootstrap.PINS['rust_version']}=/rustc/{bootstrap.RUST_SRC_COMMIT}",
+            cfg,
+        )
 
         os.environ["GITHUB_WORKSPACE"] = "/tmp/ci-ws"
         cfg = bootstrap.render_config(
             pathlib.Path("/usr/bin/true"), 1, "x86_64-unknown-linux-gnu"
         )
         self.assertIn("remap-debuginfo = true", cfg)
+        self.assertIn("omit-git-hash = false", cfg)
         self.assertIn("/vendor", cfg)
         self.assertIn("/library", cfg)
         self.assertNotIn("build-rust-1.99=/rustc/", cfg)
