@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -144,11 +145,21 @@ def main():
     for tool in (rustc, rustdoc, wrapper, opt, objdump, llvm_ar, llvm_dis):
         if not tool.is_file():
             raise ValueError(f"packaged tool is absent: {tool}")
-    bootstrap.check_sysroot_panic_paths(bootstrap.find_host_libstd(package))
     rust_version = run([rustc, "-vV"]).stdout.strip()
     if rust_version != manifest["rustc_vv"]:
         raise ValueError("extracted rustc version differs from manifest")
     validate_native_rustc_host(rust_version)
+    # The panic-path gate must examine the HOST triple's libstd: packages
+    # ship cross-target std sets too, and the alphabetically-first
+    # rustlib directory is not necessarily the host (e.g. the
+    # aarch64-apple-darwin cross std sorts before x86_64 on Windows,
+    # built from relative source paths that carry no /rustc/ prefix).
+    host_match = re.search(r"^host:\s*(\S+)$", rust_version, re.MULTILINE)
+    if not host_match:
+        raise ValueError("rustc -vV did not report a host triple")
+    bootstrap.check_sysroot_panic_paths(
+        bootstrap.find_host_libstd(package, host=host_match.group(1))
+    )
     if PINS["rust_version"] not in run([rustdoc, "--version"]).stdout:
         raise ValueError("extracted rustdoc does not match the pinned Rust version")
     verify_llvm_tool_version(run([opt, "--version"]).stdout,
