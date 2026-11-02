@@ -1,0 +1,25 @@
+name: msvc-dev-cmd pin check
+
+# Throwaway validation workflow: confirm the action resolves and runs from
+# the pinned v1.13.0 commit SHA before offering the pin upstream.
+# Delete this branch after the check passes.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pin-check:
+    runs-on: windows-latest
+    steps:
+      - name: Set up MSVC (pinned commit SHA)
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+
+      - name: Show resolved environment
+        shell: cmd
+        run: |
+          echo VSCMD_VER=%VSCMD_VER%
+          echo VSCMD_ARG_TGT_ARCH=%VSCMD_ARG_TGT_ARCH%
+          cl 2>&1 | findstr /C:"Version"
