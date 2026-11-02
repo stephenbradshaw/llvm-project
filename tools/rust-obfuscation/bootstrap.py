@@ -540,13 +540,19 @@ def check_sysroot_panic_paths(libstd: Path, commit: str = RUST_SRC_COMMIT) -> No
         )
 
 
-def find_host_libstd(stage_or_package: Path) -> Path:
-    """Locate the host libstd rlib under a stage1 tree or packaged toolchain."""
+def find_host_libstd(stage_or_package: Path, host: str | None = None) -> Path:
+    """Locate the host libstd rlib under a stage1 tree or packaged toolchain.
+
+    With `host`, prefer that exact triple's directory (cross-target std
+    trees contain several hosts; alphabetical order alone can pick a
+    non-host one, e.g. aarch64-apple-darwin before x86_64 on Linux).
+    """
     root = Path(stage_or_package)
     candidates = [
         root / "rust-toolchain",
         root,
     ]
+    fallback: Path | None = None
     for base in candidates:
         rustlib = base / "lib" / "rustlib"
         if not rustlib.is_dir():
@@ -556,8 +562,14 @@ def find_host_libstd(stage_or_package: Path) -> Path:
             if not lib.is_dir():
                 continue
             matches = sorted(lib.glob("libstd-*.rlib"))
-            if matches:
+            if not matches:
+                continue
+            if host and host_dir.name == host:
                 return matches[0]
+            if fallback is None:
+                fallback = matches[0]
+    if fallback is not None:
+        return fallback
     raise RuntimeError(f"no host libstd rlib under {root}")
 
 
@@ -731,7 +743,11 @@ def main() -> int:
             if not args.libstd:
                 raise RuntimeError("check-sysroot-paths requires --libstd")
             target = args.libstd
-            libstd = target if target.name.startswith("libstd-") and target.suffix == ".rlib" else find_host_libstd(target)
+            libstd = (
+                target
+                if target.name.startswith("libstd-") and target.suffix == ".rlib"
+                else find_host_libstd(target, host=args.host or host_triple())
+            )
             check_sysroot_panic_paths(libstd)
             print(f"PASS sysroot panic paths: {libstd}")
             return 0

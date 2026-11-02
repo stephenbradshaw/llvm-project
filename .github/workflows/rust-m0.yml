@@ -202,6 +202,13 @@ jobs:
           # stage1 src symlink). Re-export explicitly so a step-level
           # override cannot silently drop them.
           export RUSTFLAGS="$(python -B tools/rust-obfuscation/bootstrap.py print-remaps --host '${{ matrix.host }}')"
+          # git-bash (MSYS2) rewrites env values that contain POSIX-rooted
+          # paths when spawning native tools: /rustc/<...> becomes the MSYS
+          # installation root and drive-colon lists become semicolons,
+          # corrupting the remap flags before cargo ever sees them. Exclude
+          # RUSTFLAGS from that conversion (no-op off Windows).
+          export MSYS2_ENV_CONV_EXCL="RUSTFLAGS"
+          export MSYS_NO_PATHCONV=1
           # On Windows the runner's bash is msys: $(pwd) yields /c/-style
           # paths that native cargo cannot execute. Convert to a Windows
           # path; on Linux/macOS cygpath does not exist and this is a no-op.
